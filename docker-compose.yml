@@ -1,0 +1,78 @@
+# =============================================================================
+# DS-Reasonix Docker Compose — 一键部署（绿联 NAS / 任意 Docker 主机）
+#
+#   cp .env.docker.example .env    # 先填写 DEEPSEEK_API_KEY
+#   docker compose up -d           # 海外/可访问 GHCR：拉取镜像
+#   docker compose up -d --build   # 国内网络：本地构建（配合 GOPROXY=goproxy.cn）
+#
+#   访问：http://NAS地址:7551  (前端, nginx 反向代理)
+#         http://NAS地址:7552  (后端, reasonix serve 直连)
+# =============================================================================
+
+name: ds-reasonix
+
+services:
+  # ---------------------------------------------------------------------------
+  # 后端：reasonix serve 引擎（Web UI + SSE 事件流 + JSON API，单端口）
+  # ---------------------------------------------------------------------------
+  reasonix:
+    image: ghcr.io/mogvl/ds-reasonix:latest
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        VERSION: ${VERSION:-docker}
+    container_name: ds-reasonix
+    restart: unless-stopped
+    environment:
+      # 必填：DeepSeek API 密钥（从 .env 注入，入口脚本写入 <home>/.env）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?请在 .env 中设置 DEEPSEEK_API_KEY（参考 .env.docker.example）}
+      # Web 鉴权：none | token（默认，随机或固定）| password
+      REASONIX_SERVE_AUTH: ${REASONIX_SERVE_AUTH:-token}
+      REASONIX_SERVE_TOKEN: ${REASONIX_SERVE_TOKEN:-}
+      REASONIX_SERVE_PASSWORD: ${REASONIX_SERVE_PASSWORD:-}
+      # 位于 nginx 前端之后，信任 X-Forwarded-* 头
+      REASONIX_SERVE_BEHIND_PROXY: ${REASONIX_SERVE_BEHIND_PROXY:-true}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # 后端端口（宿主:容器），默认 7552:7552
+      - "${BACKEND_PORT:-7552}:7552"
+    volumes:
+      # Reasonix 数据目录：配置、凭据、会话、记忆（首次启动自动从 ./config 播种）
+      - ./data/reasonix:/home/reasonix
+      # 工作区：agent 在此目录内执行任务，可从 NAS 文件管理器查看产出
+      - ./workspace:/workspace
+      # 只读配置模板（首次启动复制到数据目录，之后以数据目录中的为准）
+      - ./config:/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7552/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 前端：nginx 反向代理（SSE 友好），统一入口端口 7551
+  # ---------------------------------------------------------------------------
+  web:
+    image: nginx:1.27-alpine
+    container_name: ds-reasonix-web
+    restart: unless-stopped
+    depends_on:
+      reasonix:
+        condition: service_healthy
+    ports:
+      # 前端端口（宿主:容器），默认 7551:80
+      - "${WEB_PORT:-7551}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

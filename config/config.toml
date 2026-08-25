@@ -1,0 +1,36 @@
+# Reasonix global configuration (seeded into <REASONIX_HOME>/config.toml on
+# first container start; edit the copy in ./data/reasonix/ afterward).
+# Resolution order: flag > ./reasonix.toml > <Reasonix home>/config.toml > built-in defaults.
+#
+# Secrets are never stored here: providers reference api_key_env, and the
+# entrypoint copies the matching *API_KEY environment variables from the
+# compose file into <REASONIX_HOME>/.env on every start.
+
+default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
+language      = "zh"         # ui language
+
+[ui]
+theme = "auto"   # auto|dark|light; controls CLI colors only
+
+[agent]
+temperature = 0.0
+
+# Container deployment: OS-level bash sandboxing (bubblewrap) is unavailable
+# inside Docker on most NAS kernels, so bash runs unconfined — the container
+# itself is the isolation boundary (agent writes are confined to the mounted
+# workspace by the workspace_root rule below).
+[sandbox]
+bash          = "off"
+workspace_root = "/workspace"   # agent file-writes stay under the workspace volume
+
+# A provider is a vendor endpoint (one base_url + key) that offers one or more
+# models. Add more [[providers]] blocks for other OpenAI-compatible endpoints;
+# only the listed base_url and models are used.
+[[providers]]
+name            = "deepseek"
+kind            = "openai"
+base_url        = "https://api.deepseek.com"
+models          = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default         = "deepseek-v4-flash"   # optional; defaults to the first of `models`
+api_key_env     = "DEEPSEEK_API_KEY"
+context_window  = 1000000
